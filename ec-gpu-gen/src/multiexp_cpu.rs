@@ -21,6 +21,7 @@ pub trait SourceBuilder<G: PrimeCurveAffine>: Send + Sync + 'static + Clone {
     #[allow(clippy::wrong_self_convention)]
     fn new(self) -> Self::Source;
     fn get(self) -> (Arc<Vec<G>>, usize);
+    fn new_len(&self, n: usize) -> Self;
 }
 
 /// A source of bases, like an iterator.
@@ -41,6 +42,10 @@ impl<G: PrimeCurveAffine> SourceBuilder<G> for (Arc<Vec<G>>, usize) {
 
     fn get(self) -> (Arc<Vec<G>>, usize) {
         (self.0.clone(), self.1)
+    }
+
+    fn new_len(&self, n: usize) -> (Arc<Vec<G>>, usize) {
+        (self.0.clone(), n)
     }
 }
 
