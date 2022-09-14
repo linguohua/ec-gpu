@@ -1,15 +1,16 @@
 use std::any::TypeId;
 use std::ops::AddAssign;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 
 use ec_gpu::GpuEngine;
 use ff::PrimeField;
 use group::{prime::PrimeCurveAffine, Group};
 use log::{error, info, warn};
 use pairing::Engine;
-use rust_gpu_tools::{program_closures, Device, Program, Vendor, CUDA_CORES};
+use rust_gpu_tools::{program_closures, Device, Program, UniqueId, Vendor, CUDA_CORES};
 use yastl::Scope;
 
+use crate::threadpool::GPU_PROGRAM_LOCKS;
 use crate::{
     error::{EcError, EcResult},
     program,
@@ -46,7 +47,7 @@ where
     /// multiexp calculations. If it returns true, the calculation will be aborted with an
     /// [`EcError::Aborted`].
     maybe_abort: Option<&'a (dyn Fn() -> bool + Send + Sync)>,
-
+    glock: Arc<Mutex<()>>,
     _phantom: std::marker::PhantomData<E::Fr>,
 }
 
@@ -111,8 +112,18 @@ where
     /// leaving the GPU in a weird state. If that function returns `true`, execution is aborted.
     pub fn create(
         device: &Device,
+        gpu_id: &UniqueId,
         maybe_abort: Option<&'a (dyn Fn() -> bool + Send + Sync)>,
     ) -> EcResult<Self> {
+        info!("SingleMultiexpKernel create, id:{}", gpu_id);
+        let lck = {
+            let mut llock = GPU_PROGRAM_LOCKS.lock().unwrap();
+            let lck = llock
+                .entry(gpu_id.to_string())
+                .or_insert(Arc::new(Mutex::new(())));
+            lck.clone()
+        };
+
         let exp_bits = exp_size::<E>() * 8;
         let core_count = get_cuda_cores_count(&device.name());
         let mem = device.memory();
@@ -120,16 +131,21 @@ where
         let best_n = calc_best_chunk_size(MAX_WINDOW_SIZE, core_count, exp_bits);
         let n = std::cmp::min(max_n, best_n);
 
+        info!("SingleMultiexpKernel lock, id:{}", gpu_id);
+        let lck2 = lck.clone();
+        let lck = lck.lock().unwrap();
         let source = match device.vendor() {
             Vendor::Nvidia => crate::gen_source::<E, Limb32>(),
             _ => crate::gen_source::<E, Limb64>(),
         };
         let program = program::program::<E>(device, &source)?;
+        drop(lck);
 
         Ok(SingleMultiexpKernel {
             program,
             core_count,
             n,
+            glock: lck2,
             maybe_abort,
             _phantom: std::marker::PhantomData,
         })
@@ -166,17 +182,6 @@ where
                 let base_buffer = program.create_buffer_from_slice(bases)?;
                 let exp_buffer = program.create_buffer_from_slice(exps)?;
 
-                // It is safe as the GPU will initialize that buffer
-                let bucket_buffer = unsafe {
-                    program.create_buffer::<<G as PrimeCurveAffine>::Curve>(
-                        2 * self.core_count * bucket_len,
-                    )?
-                };
-                // It is safe as the GPU will initialize that buffer
-                let result_buffer = unsafe {
-                    program.create_buffer::<<G as PrimeCurveAffine>::Curve>(2 * self.core_count)?
-                };
-
                 // The global work size follows CUDA's definition and is the number of
                 // `LOCAL_WORK_SIZE` sized thread groups.
                 let global_work_size =
@@ -193,6 +198,20 @@ where
                     global_work_size,
                     LOCAL_WORK_SIZE,
                 )?;
+
+                let lock = self.glock.clone();
+                let _lock2 = lock.lock().unwrap();
+
+                // It is safe as the GPU will initialize that buffer
+                let bucket_buffer = unsafe {
+                    program.create_buffer::<<G as PrimeCurveAffine>::Curve>(
+                        2 * self.core_count * bucket_len,
+                    )?
+                };
+                // It is safe as the GPU will initialize that buffer
+                let result_buffer = unsafe {
+                    program.create_buffer::<<G as PrimeCurveAffine>::Curve>(2 * self.core_count)?
+                };
 
                 kernel
                     .arg(&base_buffer)
@@ -269,7 +288,8 @@ where
         let kernels: Vec<_> = devices
             .iter()
             .filter_map(|device| {
-                let kernel = SingleMultiexpKernel::<E>::create(device, maybe_abort);
+                let gpu_id = device.unique_id();
+                let kernel = SingleMultiexpKernel::<E>::create(device, &gpu_id, maybe_abort);
                 if let Err(ref e) = kernel {
                     error!(
                         "Cannot initialize kernel for device '{}'! Error: {}",

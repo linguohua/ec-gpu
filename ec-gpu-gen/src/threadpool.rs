@@ -2,9 +2,11 @@
 use std::env;
 
 use crossbeam_channel::{bounded, Receiver};
+use fnv::FnvHashMap as HashMap;
 use once_cell::sync::Lazy;
+use std::sync::{Arc, Mutex};
 use yastl::Pool;
-
+type GPULockType = HashMap<String, Arc<Mutex<()>>>;
 /// The number of threads the thread pool should use.
 ///
 /// By default it's equal to the number of CPUs, but it can be changed with the
@@ -16,6 +18,10 @@ static NUM_THREADS: Lazy<usize> = Lazy::new(read_num_threads);
 /// By default, it's size is equal to the number of CPUs. It can be set to a different value with
 /// the `EC_GPU_NUM_THREADS` environment variable.
 pub static THREAD_POOL: Lazy<Pool> = Lazy::new(|| Pool::new(*NUM_THREADS));
+
+/// GPU locks
+pub static GPU_PROGRAM_LOCKS: Lazy<Mutex<GPULockType>> =
+    Lazy::new(|| Mutex::new(GPULockType::default()));
 
 /// Returns the number of threads.
 ///
