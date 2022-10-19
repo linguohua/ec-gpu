@@ -176,7 +176,7 @@ impl<'a, E: Engine + GpuEngine> SingleFftKernel<'a, E> {
     fn radix_fft2(&mut self, input: &mut [E::Fr], omega: &E::Fr, log_n: u32) -> EcResult<()> {
         let closures = program_closures!(|program, input: &mut [E::Fr]| -> EcResult<()> {
             let n = 1 << log_n;
-			info!("radix_fft2 input len:{}, n:{}", input.len(), n);
+			info!("radix_fft2 input len:{}, n:{}, element size:{}", input.len(), n, std::mem::size_of::<E::Fr>());
 
             // The precalculated values pq` and `omegas` are valid for radix degrees up to `max_deg`
             let max_deg = cmp::min(MAX_LOG2_RADIX, log_n);
