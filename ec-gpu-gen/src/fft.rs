@@ -94,6 +94,7 @@ impl<'a, E: Engine + GpuEngine> SingleFftKernel<'a, E> {
     fn radix_fft1(&mut self, input: &mut [E::Fr], omega: &E::Fr, log_n: u32) -> EcResult<()> {
         let closures = program_closures!(|program, input: &mut [E::Fr]| -> EcResult<()> {
             let n = 1 << log_n;
+
             // The precalculated values pq` and `omegas` are valid for radix degrees up to `max_deg`
             let max_deg = cmp::min(MAX_LOG2_RADIX, log_n);
 
@@ -175,6 +176,7 @@ impl<'a, E: Engine + GpuEngine> SingleFftKernel<'a, E> {
     fn radix_fft2(&mut self, input: &mut [E::Fr], omega: &E::Fr, log_n: u32) -> EcResult<()> {
         let closures = program_closures!(|program, input: &mut [E::Fr]| -> EcResult<()> {
             let n = 1 << log_n;
+			info!("radix_fft2 input len:{}, n:{}", input.len(), n);
 
             // The precalculated values pq` and `omegas` are valid for radix degrees up to `max_deg`
             let max_deg = cmp::min(MAX_LOG2_RADIX, log_n);
@@ -208,6 +210,8 @@ impl<'a, E: Engine + GpuEngine> SingleFftKernel<'a, E> {
             // before they are read.
             let mut src_buffer = unsafe { program.create_buffer::<E::Fr>(n)? };
             let mut dst_buffer = unsafe { program.create_buffer::<E::Fr>(n)? };
+			
+			info!("radix_fft2 alloc completed: n:{}, mem:{}", n, n * std::mem::size_of<E::Fr>());
             program.write_from_buffer(&mut src_buffer, &*input)?;
             // Specifies log2 of `p`, (http://www.bealto.com/gpu-fft_group-1.html)
             let mut log_p = 0u32;
