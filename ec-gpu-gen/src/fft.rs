@@ -211,7 +211,7 @@ impl<'a, E: Engine + GpuEngine> SingleFftKernel<'a, E> {
             let mut src_buffer = unsafe { program.create_buffer::<E::Fr>(n)? };
             let mut dst_buffer = unsafe { program.create_buffer::<E::Fr>(n)? };
 			
-			info!("radix_fft2 alloc completed: n:{}, mem:{}", n, n * std::mem::size_of<E::Fr>());
+			info!("radix_fft2 alloc completed: n:{}, mem:{}", n, n * std::mem::size_of::<E::Fr>());
             program.write_from_buffer(&mut src_buffer, &*input)?;
             // Specifies log2 of `p`, (http://www.bealto.com/gpu-fft_group-1.html)
             let mut log_p = 0u32;
