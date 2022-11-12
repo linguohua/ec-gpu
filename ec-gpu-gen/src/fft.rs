@@ -295,8 +295,8 @@ impl<'a, E: Engine + GpuEngine> SingleFftKernel<'a, E> {
         }
 
         let omega_double = omega.square();
-        self.radix_fft_o(&mut evens[..], &omega_double, log_n / 2)?;
-        self.radix_fft_o(&mut odds[..], &omega_double, log_n / 2)?;
+        self.radix_fft_o(&mut evens[..], &omega_double, log_n - 1)?;
+        self.radix_fft_o(&mut odds[..], &omega_double, log_n - 1)?;
 
         let mut w_m = E::Fr::one();
         for i in 0..n / 2 {
