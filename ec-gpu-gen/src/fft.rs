@@ -288,8 +288,9 @@ impl<'a, E: Engine + GpuEngine> SingleFftKernel<'a, E> {
 
         let n = input.len();
         let now2 = std::time::Instant::now();
-        let mut evens = vec![E::Fr::one(); n / 2];
-        let mut odds = vec![E::Fr::one(); n / 2];
+
+        let mut evens = Vec::with_capacity(n / 2);
+        let mut odds = Vec::with_capacity(n / 2);
         let gpu_dur3 = now2.elapsed().as_secs() * 1000 + now2.elapsed().subsec_millis() as u64;
         println!("GPU radix_fft3 alloc evens/odds {}ms.", gpu_dur3);
 
@@ -298,20 +299,29 @@ impl<'a, E: Engine + GpuEngine> SingleFftKernel<'a, E> {
 
         let now2 = std::time::Instant::now();
         // even and odd to half array
-        THREAD_POOL.scoped(|s| {
-            for ((es, os), ip) in evens
-                .chunks_mut(chunk_size)
-                .zip(odds.chunks_mut(chunk_size))
-                .zip(input.chunks(chunk_size * 2))
-            {
-                s.execute(move || {
-                    for i in 0..es.len() {
-                        es[i] = ip[i * 2];
-                        os[i] = ip[i * 2 + 1];
-                    }
-                });
-            }
-        });
+        unsafe {
+            let evens_slice = std::slice::from_raw_parts_mut(evens.as_mut_ptr(), n / 2);
+            let odds_slice = std::slice::from_raw_parts_mut(odds.as_mut_ptr(), n / 2);
+
+            THREAD_POOL.scoped(|s| {
+                for ((es, os), ip) in evens_slice
+                    .chunks_mut(chunk_size)
+                    .zip(odds_slice.chunks_mut(chunk_size))
+                    .zip(input.chunks(chunk_size * 2))
+                {
+                    s.execute(move || {
+                        for i in 0..es.len() {
+                            es[i] = ip[i * 2];
+                            os[i] = ip[i * 2 + 1];
+                        }
+                    });
+                }
+            });
+
+            evens.set_len(n / 2);
+            odds.set_len(n / 2);
+        }
+
         let gpu_dur3 = now2.elapsed().as_secs() * 1000 + now2.elapsed().subsec_millis() as u64;
         println!("GPU radix_fft3 copy evens/odds {}ms.", gpu_dur3);
 
