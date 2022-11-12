@@ -11,7 +11,7 @@ type GPULockType = HashMap<String, Arc<Mutex<()>>>;
 ///
 /// By default it's equal to the number of CPUs, but it can be changed with the
 /// `EC_GPU_NUM_THREADS` environment variable.
-static NUM_THREADS: Lazy<usize> = Lazy::new(read_num_threads);
+pub static NUM_THREADS: Lazy<usize> = Lazy::new(read_num_threads);
 
 /// The thread pool that is used for the computations.
 ///

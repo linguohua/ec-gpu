@@ -8,7 +8,7 @@ use log::{error, info};
 use pairing::Engine;
 use rust_gpu_tools::{program_closures, Device, LocalBuffer, Program, UniqueId, Vendor};
 
-use crate::threadpool::{GPU_PROGRAM_LOCKS, THREAD_POOL};
+use crate::threadpool::{GPU_PROGRAM_LOCKS, NUM_THREADS, THREAD_POOL};
 use crate::{
     error::{EcError, EcResult},
     program, Limb32, Limb64,
@@ -286,31 +286,79 @@ impl<'a, E: Engine + GpuEngine> SingleFftKernel<'a, E> {
         let _lock2 = lock.lock().unwrap();
 
         let n = input.len();
-        let mut evens = Vec::with_capacity(n / 2);
-        let mut odds = Vec::with_capacity(n / 2);
+        let mut evens = vec![E::Fr::one(); n / 2];
+        let mut odds = vec![E::Fr::one(); n / 2];
 
-        for i in 0..n / 2 {
-            evens.push(input[i * 2]);
-            odds.push(input[i * 2 + 1]);
-        }
+        let chunk_count = cmp::max(*NUM_THREADS - 4, 1);
+        let chunk_size = (n / 2) / chunk_count;
 
+        // even and odd to half array
+        THREAD_POOL.scoped(|s| {
+            for ((es, os), ip) in evens
+                .chunks_mut(chunk_size)
+                .zip(odds.chunks_mut(chunk_size))
+                .zip(input.chunks(chunk_size * 2))
+            {
+                s.execute(move || {
+                    for i in 0..es.len() {
+                        es[i] = ip[i * 2];
+                        os[i] = ip[i * 2 + 1];
+                    }
+                });
+            }
+        });
+
+        // call gpu to do double halfs fft
         let omega_double = omega.square();
         self.radix_fft_o(&mut evens[..], &omega_double, log_n - 1)?;
         self.radix_fft_o(&mut odds[..], &omega_double, log_n - 1)?;
 
-        let mut w_m = E::Fr::one();
-        for i in 0..n / 2 {
-            odds[i] = odds[i] * w_m;
-            w_m = w_m * omega;
-        }
+        // odds
+        THREAD_POOL.scoped(|s| {
+            for (index, os) in odds.chunks_mut(chunk_size).enumerate() {
+                s.execute(move || {
+                    let mut w_m = E::Fr::one();
+                    if index > 0 {
+                        w_m = w_m.pow_vartime(&[index as u64]);
+                    }
 
-        for i in 0..n / 2 {
-            input[i] = evens[i] + odds[i]
-        }
+                    for i in 0..os.len() {
+                        os[i] = os[i] * w_m;
+                        w_m = w_m * omega;
+                    }
+                });
+            }
+        });
 
-        for i in 0..n / 2 {
-            input[i + n / 2] = evens[i] - odds[i]
-        }
+        // low half output
+        THREAD_POOL.scoped(|s| {
+            for ((es, os), ip) in evens
+                .chunks(chunk_size)
+                .zip(odds.chunks(chunk_size))
+                .zip(input[..n / 2].chunks_mut(chunk_size))
+            {
+                s.execute(move || {
+                    for i in 0..es.len() {
+                        ip[i] = es[i] + os[i]
+                    }
+                });
+            }
+        });
+
+        // high half output
+        THREAD_POOL.scoped(|s| {
+            for ((es, os), ip) in evens
+                .chunks(chunk_size)
+                .zip(odds.chunks(chunk_size))
+                .zip(input[n / 2..].chunks_mut(chunk_size))
+            {
+                s.execute(move || {
+                    for i in 0..es.len() {
+                        ip[i] = es[i] - os[i]
+                    }
+                });
+            }
+        });
 
         Ok(())
     }
