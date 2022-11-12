@@ -290,8 +290,8 @@ impl<'a, E: Engine + GpuEngine> SingleFftKernel<'a, E> {
         let mut odds = Vec::with_capacity(n / 2);
 
         for i in 0..n / 2 {
-            evens[i] = input[i * 2];
-            odds[i] = input[i * 2 + 1];
+            evens.push(input[i * 2]);
+            odds.push(input[i * 2 + 1]);
         }
 
         let omega_double = omega.square();
