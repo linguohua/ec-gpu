@@ -310,13 +310,20 @@ impl<'a, E: Engine + GpuEngine> SingleFftKernel<'a, E> {
 
         // call gpu to do double halfs fft
         THREAD_POOL.scoped(|s| -> EcResult<()> {
-            s.execute(|| {
-                let mut w_m = E::Fr::one();
-                for i in 0..n / 2 {
-                    input[i] = w_m;
-                    w_m = w_m * omega;
-                }
-            });
+            for (index, ip) in input[0..n / 2].chunks_mut(chunk_size).enumerate() {
+                s.execute(move || {
+                    let mut w_m = if index > 0 {
+                        omega.pow_vartime(&[(index * chunk_size) as u64])
+                    } else {
+                        E::Fr::one()
+                    };
+
+                    for i in 0..ip.len() {
+                        ip[i] = w_m;
+                        w_m = w_m * omega;
+                    }
+                });
+            }
 
             let now = std::time::Instant::now();
             let omega_double = omega.square();
