@@ -283,7 +283,7 @@ impl<'a, E: Engine + GpuEngine> SingleFftKernel<'a, E> {
     fn radix_fft3(&mut self, input: &mut [E::Fr], omega: &E::Fr, log_n: u32) -> EcResult<()> {
         info!("radix_fft3 size:{}", input.len());
         let lock = self.glock.clone();
-        let _lock2 = lock.lock().unwrap();
+        let lock2 = lock.lock().unwrap();
 
         let n = input.len();
         let mut evens = vec![E::Fr::one(); n / 2];
@@ -393,6 +393,7 @@ impl<'a, E: Engine + GpuEngine> SingleFftKernel<'a, E> {
         let now2 = std::time::Instant::now();
         drop(evens);
         drop(odds);
+        drop(lock2);
         let gpu_dur3 = now2.elapsed().as_secs() * 1000 + now2.elapsed().subsec_millis() as u64;
         println!("GPU radix_fft3 drop {}ms.", gpu_dur3);
         Ok(())
