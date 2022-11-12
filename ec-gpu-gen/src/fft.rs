@@ -282,6 +282,7 @@ impl<'a, E: Engine + GpuEngine> SingleFftKernel<'a, E> {
 
     fn radix_fft3(&mut self, input: &mut [E::Fr], omega: &E::Fr, log_n: u32) -> EcResult<()> {
         info!("radix_fft3 size:{}", input.len());
+        let now88 = std::time::Instant::now();
         let lock = self.glock.clone();
         let lock2 = lock.lock().unwrap();
 
@@ -396,6 +397,9 @@ impl<'a, E: Engine + GpuEngine> SingleFftKernel<'a, E> {
         drop(lock2);
         let gpu_dur3 = now2.elapsed().as_secs() * 1000 + now2.elapsed().subsec_millis() as u64;
         println!("GPU radix_fft3 drop {}ms.", gpu_dur3);
+
+        let gpu_dur88 = now88.elapsed().as_secs() * 1000 + now88.elapsed().subsec_millis() as u64;
+        println!("GPU radix_fft3 end {}ms.", gpu_dur88);
         Ok(())
     }
 
@@ -564,7 +568,11 @@ where
     ///
     /// Uses the first available GPU.
     pub fn radix_fft2(&mut self, input: &mut [E::Fr], omega: &E::Fr, log_n: u32) -> EcResult<()> {
-        self.kernels[0].radix_fft2(input, omega, log_n)
+        let now2 = std::time::Instant::now();
+        let r = self.kernels[0].radix_fft2(input, omega, log_n);
+        let gpu_dur3 = now2.elapsed().as_secs() * 1000 + now2.elapsed().subsec_millis() as u64;
+        println!("GPU radix_fft2 kernel {}ms.", gpu_dur3);
+        r
     }
 
     /// Performs FFT on `input`
