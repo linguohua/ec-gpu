@@ -390,6 +390,11 @@ impl<'a, E: Engine + GpuEngine> SingleFftKernel<'a, E> {
         let gpu_dur3 = now2.elapsed().as_secs() * 1000 + now2.elapsed().subsec_millis() as u64;
         println!("GPU radix_fft3 high half {}ms.", gpu_dur3);
 
+        let now2 = std::time::Instant::now();
+        drop(evens);
+        drop(odds);
+        let gpu_dur3 = now2.elapsed().as_secs() * 1000 + now2.elapsed().subsec_millis() as u64;
+        println!("GPU radix_fft3 drop {}ms.", gpu_dur3);
         Ok(())
     }
 
