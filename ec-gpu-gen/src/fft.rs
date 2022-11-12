@@ -282,22 +282,17 @@ impl<'a, E: Engine + GpuEngine> SingleFftKernel<'a, E> {
 
     fn radix_fft3(&mut self, input: &mut [E::Fr], omega: &E::Fr, log_n: u32) -> EcResult<()> {
         info!("radix_fft3 size:{}", input.len());
-        let now88 = std::time::Instant::now();
         let lock = self.glock.clone();
-        let lock2 = lock.lock().unwrap();
+        let _lock2 = lock.lock().unwrap();
 
         let n = input.len();
-        let now2 = std::time::Instant::now();
 
         let mut evens = Vec::with_capacity(n / 2);
         let mut odds = Vec::with_capacity(n / 2);
-        let gpu_dur3 = now2.elapsed().as_secs() * 1000 + now2.elapsed().subsec_millis() as u64;
-        println!("GPU radix_fft3 alloc evens/odds {}ms.", gpu_dur3);
 
         let chunk_count = cmp::max(*NUM_THREADS - 4, 1);
         let chunk_size = (n / 2) / chunk_count;
 
-        let now2 = std::time::Instant::now();
         // even and odd to half array
         unsafe {
             let evens_slice = std::slice::from_raw_parts_mut(evens.as_mut_ptr(), n / 2);
@@ -322,10 +317,6 @@ impl<'a, E: Engine + GpuEngine> SingleFftKernel<'a, E> {
             odds.set_len(n / 2);
         }
 
-        let gpu_dur3 = now2.elapsed().as_secs() * 1000 + now2.elapsed().subsec_millis() as u64;
-        println!("GPU radix_fft3 copy evens/odds {}ms.", gpu_dur3);
-
-        let now2 = std::time::Instant::now();
         // call gpu to do double halfs fft
         THREAD_POOL.scoped(|s| -> EcResult<()> {
             for (index, ip) in input[0..n / 2].chunks_mut(chunk_size).enumerate() {
@@ -343,18 +334,12 @@ impl<'a, E: Engine + GpuEngine> SingleFftKernel<'a, E> {
                 });
             }
 
-            let now = std::time::Instant::now();
             let omega_double = omega.square();
             self.radix_fft_o(&mut evens[..], &omega_double, log_n - 1)?;
             self.radix_fft_o(&mut odds[..], &omega_double, log_n - 1)?;
-            let gpu_dur2 = now.elapsed().as_secs() * 1000 + now.elapsed().subsec_millis() as u64;
-            println!("GPU radix_fft3 gpu took {}ms.", gpu_dur2);
             Ok(())
         })?;
-        let gpu_dur3 = now2.elapsed().as_secs() * 1000 + now2.elapsed().subsec_millis() as u64;
-        println!("GPU radix_fft3 omega {}ms.", gpu_dur3);
 
-        let now2 = std::time::Instant::now();
         // odds
         THREAD_POOL.scoped(|s| {
             for (os, ip) in odds
@@ -368,10 +353,7 @@ impl<'a, E: Engine + GpuEngine> SingleFftKernel<'a, E> {
                 });
             }
         });
-        let gpu_dur3 = now2.elapsed().as_secs() * 1000 + now2.elapsed().subsec_millis() as u64;
-        println!("GPU radix_fft3 odds {}ms.", gpu_dur3);
 
-        let now2 = std::time::Instant::now();
         // low half output
         THREAD_POOL.scoped(|s| {
             for ((es, os), ip) in evens
@@ -386,10 +368,7 @@ impl<'a, E: Engine + GpuEngine> SingleFftKernel<'a, E> {
                 });
             }
         });
-        let gpu_dur3 = now2.elapsed().as_secs() * 1000 + now2.elapsed().subsec_millis() as u64;
-        println!("GPU radix_fft3 low half {}ms.", gpu_dur3);
 
-        let now2 = std::time::Instant::now();
         // high half output
         THREAD_POOL.scoped(|s| {
             for ((es, os), ip) in evens
@@ -404,18 +383,7 @@ impl<'a, E: Engine + GpuEngine> SingleFftKernel<'a, E> {
                 });
             }
         });
-        let gpu_dur3 = now2.elapsed().as_secs() * 1000 + now2.elapsed().subsec_millis() as u64;
-        println!("GPU radix_fft3 high half {}ms.", gpu_dur3);
 
-        let now2 = std::time::Instant::now();
-        drop(evens);
-        drop(odds);
-        drop(lock2);
-        let gpu_dur3 = now2.elapsed().as_secs() * 1000 + now2.elapsed().subsec_millis() as u64;
-        println!("GPU radix_fft3 drop {}ms.", gpu_dur3);
-
-        let gpu_dur88 = now88.elapsed().as_secs() * 1000 + now88.elapsed().subsec_millis() as u64;
-        println!("GPU radix_fft3 end {}ms.", gpu_dur88);
         Ok(())
     }
 
