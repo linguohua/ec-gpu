@@ -573,7 +573,11 @@ where
     ///
     /// Uses the first available GPU.
     pub fn radix_fft3(&mut self, input: &mut [E::Fr], omega: &E::Fr, log_n: u32) -> EcResult<()> {
-        self.kernels[0].radix_fft3(input, omega, log_n)
+        let now2 = std::time::Instant::now();
+        let r = self.kernels[0].radix_fft3(input, omega, log_n);
+        let gpu_dur3 = now2.elapsed().as_secs() * 1000 + now2.elapsed().subsec_millis() as u64;
+        println!("GPU radix_fft3 kernel {}ms.", gpu_dur3);
+        r
     }
 
     /// Performs FFT on `inputs`
