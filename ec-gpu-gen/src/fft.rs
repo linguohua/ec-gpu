@@ -317,10 +317,11 @@ impl<'a, E: Engine + GpuEngine> SingleFftKernel<'a, E> {
         THREAD_POOL.scoped(|s| {
             for (index, os) in odds.chunks_mut(chunk_size).enumerate() {
                 s.execute(move || {
-                    let mut w_m = E::Fr::one();
-                    if index > 0 {
-                        w_m = w_m.pow_vartime(&[index as u64]);
-                    }
+                    let mut w_m = if index > 0 {
+                        omega.pow_vartime(&[(index * chunk_size) as u64])
+                    } else {
+                        E::Fr::one()
+                    };
 
                     for i in 0..os.len() {
                         os[i] = os[i] * w_m;
