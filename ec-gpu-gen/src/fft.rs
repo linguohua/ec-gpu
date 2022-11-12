@@ -734,7 +734,7 @@ mod tests {
         let devices = Device::all();
         let mut kern = FftKernel::<Bls12>::create(&devices).expect("Cannot initialize kernel!");
 
-        let log_d = 10;
+        let log_d = 20;
         let d = 1 << log_d;
 
         let mut v1_coeffs = (0..d).map(|_| Fr::random(&mut rng)).collect::<Vec<_>>();
