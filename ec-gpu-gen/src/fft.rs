@@ -18,6 +18,12 @@ const LOG2_MAX_ELEMENTS: usize = 32; // At most 2^32 elements is supported.
 const MAX_LOG2_RADIX: u32 = 8; // Radix256
 const MAX_LOG2_LOCAL_WORK_SIZE: u32 = 7; // 128
 
+enum FFTDeviceMemType {
+    Huge,
+    Small,
+    Tiny,
+}
+
 /// FFT kernel for a single GPU.
 pub struct SingleFftKernel<'a, E>
 where
@@ -28,7 +34,7 @@ where
     /// calculations. If it returns true, the calculation will be aborted with an
     /// [`EcError::Aborted`].
     maybe_abort: Option<&'a (dyn Fn() -> bool + Send + Sync)>,
-    lock_stupid: bool,
+    mem_type: FFTDeviceMemType,
     glock: Arc<Mutex<()>>,
     _phantom: std::marker::PhantomData<E::Fr>,
 }
@@ -52,11 +58,16 @@ impl<'a, E: Engine + GpuEngine> SingleFftKernel<'a, E> {
             lck.clone()
         };
 
-        let lock_stupid = if device.memory() < (20 * 1024 * 1024 * 1024) {
-            info!("fft lock stupid, id:{}", gpu_id);
-            true
+        let mem_size = device.memory();
+        let mem_type = if mem_size >= (20 * 1024 * 1024 * 1024) {
+            info!("fft lock mem type: huge, id:{}", gpu_id);
+            FFTDeviceMemType::Huge
+        } else if mem_size >= (10 * 1024 * 1024 * 1024) {
+            info!("fft lock mem type: small, id:{}", gpu_id);
+            FFTDeviceMemType::Small
         } else {
-            false
+            info!("fft lock mem type: tiny, id:{}", gpu_id);
+            FFTDeviceMemType::Tiny
         };
 
         info!("SingleFftKernel lock, id:{}", gpu_id);
@@ -74,7 +85,7 @@ impl<'a, E: Engine + GpuEngine> SingleFftKernel<'a, E> {
         Ok(SingleFftKernel {
             program,
             maybe_abort,
-            lock_stupid,
+            mem_type,
             glock: lck2,
             _phantom: Default::default(),
         })
@@ -84,14 +95,15 @@ impl<'a, E: Engine + GpuEngine> SingleFftKernel<'a, E> {
     /// * `omega` - Special value `omega` is used for FFT over finite-fields
     /// * `log_n` - Specifies log2 of number of elements
     pub fn radix_fft(&mut self, input: &mut [E::Fr], omega: &E::Fr, log_n: u32) -> EcResult<()> {
-        if self.lock_stupid {
-            self.radix_fft2(input, omega, log_n)
-        } else {
-            self.radix_fft1(input, omega, log_n)
+        match self.mem_type {
+            FFTDeviceMemType::Huge => self.radix_fft1(input, omega, log_n),
+            FFTDeviceMemType::Small => self.radix_fft2(input, omega, log_n),
+            FFTDeviceMemType::Tiny => self.radix_fft3(input, omega, log_n),
         }
     }
 
     fn radix_fft1(&mut self, input: &mut [E::Fr], omega: &E::Fr, log_n: u32) -> EcResult<()> {
+        info!("radix_fft1 size:{}", input.len());
         let closures = program_closures!(|program, input: &mut [E::Fr]| -> EcResult<()> {
             let n = 1 << log_n;
 
@@ -174,9 +186,15 @@ impl<'a, E: Engine + GpuEngine> SingleFftKernel<'a, E> {
     }
 
     fn radix_fft2(&mut self, input: &mut [E::Fr], omega: &E::Fr, log_n: u32) -> EcResult<()> {
+        info!("radix_fft2 size:{}", input.len());
         let closures = program_closures!(|program, input: &mut [E::Fr]| -> EcResult<()> {
             let n = 1 << log_n;
-			info!("radix_fft2 input len:{}, n:{}, element size:{}", input.len(), n, std::mem::size_of::<E::Fr>());
+            info!(
+                "radix_fft2 input len:{}, n:{}, element size:{}",
+                input.len(),
+                n,
+                std::mem::size_of::<E::Fr>()
+            );
 
             // The precalculated values pq` and `omegas` are valid for radix degrees up to `max_deg`
             let max_deg = cmp::min(MAX_LOG2_RADIX, log_n);
@@ -210,8 +228,12 @@ impl<'a, E: Engine + GpuEngine> SingleFftKernel<'a, E> {
             // before they are read.
             let mut src_buffer = unsafe { program.create_buffer::<E::Fr>(n)? };
             let mut dst_buffer = unsafe { program.create_buffer::<E::Fr>(n)? };
-			
-			info!("radix_fft2 alloc completed: n:{}, mem:{}", n, n * std::mem::size_of::<E::Fr>());
+
+            info!(
+                "radix_fft2 alloc completed: n:{}, mem:{}",
+                n,
+                n * std::mem::size_of::<E::Fr>()
+            );
             program.write_from_buffer(&mut src_buffer, &*input)?;
             // Specifies log2 of `p`, (http://www.bealto.com/gpu-fft_group-1.html)
             let mut log_p = 0u32;
@@ -256,6 +278,41 @@ impl<'a, E: Engine + GpuEngine> SingleFftKernel<'a, E> {
         });
 
         self.program.run(closures, input)
+    }
+
+    fn radix_fft3(&mut self, input: &mut [E::Fr], omega: &E::Fr, log_n: u32) -> EcResult<()> {
+        info!("radix_fft3 size:{}", input.len());
+        let lock = self.glock.clone();
+        let _lock2 = lock.lock().unwrap();
+
+        let n = input.len();
+        let mut evens = Vec::with_capacity(n / 2);
+        let mut odds = Vec::with_capacity(n / 2);
+
+        for i in 0..n / 2 {
+            evens[i] = input[i * 2];
+            odds[i] = input[i * 2 + 1];
+        }
+
+        let omega_double = omega.square();
+        self.radix_fft_o(&mut evens[..], &omega_double, log_n / 2)?;
+        self.radix_fft_o(&mut odds[..], &omega_double, log_n / 2)?;
+
+        let mut w_m = E::Fr::one();
+        for i in 0..n / 2 {
+            odds[i] = odds[i] * w_m;
+            w_m = w_m * omega;
+        }
+
+        for i in 0..n / 2 {
+            input[i] = evens[i] + odds[i]
+        }
+
+        for i in 0..n / 2 {
+            input[i + n / 2] = evens[i] - odds[i]
+        }
+
+        Ok(())
     }
 
     /// Performs FFT on `input`
@@ -575,5 +632,40 @@ mod tests {
 
             println!("============================");
         }
+    }
+
+    #[test]
+    pub fn gpu_fft_split() {
+        let mut rng = rand::thread_rng();
+
+        let devices = Device::all();
+        let mut kern = FftKernel::<Bls12>::create(&devices).expect("Cannot initialize kernel!");
+
+        let log_d = 10;
+        let d = 1 << log_d;
+
+        let mut v1_coeffs = (0..d).map(|_| Fr::random(&mut rng)).collect::<Vec<_>>();
+        let v1_omega = omega::<Bls12>(v1_coeffs.len());
+        let mut v2_coeffs = v1_coeffs.clone();
+        let v2_omega = v1_omega;
+
+        println!("Testing FFT for {} elements...", d);
+
+        let mut now = Instant::now();
+        kern.radix_fft2(&mut v1_coeffs, &v1_omega, log_d)
+            .expect("GPU FFT failed!");
+        let gpu_dur = now.elapsed().as_secs() * 1000 + now.elapsed().subsec_millis() as u64;
+        println!("GPU radix_fft2 {}ms.", gpu_dur);
+
+        now = Instant::now();
+        kern.radix_fft3(&mut v2_coeffs, &v2_omega, log_d)
+            .expect("GPU FFT failed!");
+        let gpu_dur2 = now.elapsed().as_secs() * 1000 + now.elapsed().subsec_millis() as u64;
+        println!("GPU radix_fft3 took {}ms.", gpu_dur2);
+
+        println!("Speedup: x{}", gpu_dur2 as f32 / gpu_dur as f32);
+
+        assert!(v1_coeffs == v2_coeffs);
+        println!("============================");
     }
 }
