@@ -465,6 +465,33 @@ where
         self.kernels[0].radix_fft(input, omega, log_n)
     }
 
+    /// Performs FFT on `input`
+    /// * `omega` - Special value `omega` is used for FFT over finite-fields
+    /// * `log_n` - Specifies log2 of number of elements
+    ///
+    /// Uses the first available GPU.
+    pub fn radix_fft1(&mut self, input: &mut [E::Fr], omega: &E::Fr, log_n: u32) -> EcResult<()> {
+        self.kernels[0].radix_fft1(input, omega, log_n)
+    }
+
+    /// Performs FFT on `input`
+    /// * `omega` - Special value `omega` is used for FFT over finite-fields
+    /// * `log_n` - Specifies log2 of number of elements
+    ///
+    /// Uses the first available GPU.
+    pub fn radix_fft2(&mut self, input: &mut [E::Fr], omega: &E::Fr, log_n: u32) -> EcResult<()> {
+        self.kernels[0].radix_fft2(input, omega, log_n)
+    }
+
+    /// Performs FFT on `input`
+    /// * `omega` - Special value `omega` is used for FFT over finite-fields
+    /// * `log_n` - Specifies log2 of number of elements
+    ///
+    /// Uses the first available GPU.
+    pub fn radix_fft3(&mut self, input: &mut [E::Fr], omega: &E::Fr, log_n: u32) -> EcResult<()> {
+        self.kernels[0].radix_fft3(input, omega, log_n)
+    }
+
     /// Performs FFT on `inputs`
     /// * `omega` - Special value `omega` is used for FFT over finite-fields
     /// * `log_n` - Specifies log2 of number of elements
