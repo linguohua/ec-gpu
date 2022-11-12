@@ -309,23 +309,33 @@ impl<'a, E: Engine + GpuEngine> SingleFftKernel<'a, E> {
         });
 
         // call gpu to do double halfs fft
-        let omega_double = omega.square();
-        self.radix_fft_o(&mut evens[..], &omega_double, log_n - 1)?;
-        self.radix_fft_o(&mut odds[..], &omega_double, log_n - 1)?;
+        THREAD_POOL.scoped(|s| -> EcResult<()> {
+            s.execute(|| {
+                let mut w_m = E::Fr::one();
+                for i in 0..n / 2 {
+                    input[i] = w_m;
+                    w_m = w_m * omega;
+                }
+            });
+
+            let now = std::time::Instant::now();
+            let omega_double = omega.square();
+            self.radix_fft_o(&mut evens[..], &omega_double, log_n - 1)?;
+            self.radix_fft_o(&mut odds[..], &omega_double, log_n - 1)?;
+            let gpu_dur2 = now.elapsed().as_secs() * 1000 + now.elapsed().subsec_millis() as u64;
+            println!("GPU radix_fft3 gpu took {}ms.", gpu_dur2);
+            Ok(())
+        })?;
 
         // odds
         THREAD_POOL.scoped(|s| {
-            for (index, os) in odds.chunks_mut(chunk_size).enumerate() {
+            for (os, ip) in odds
+                .chunks_mut(chunk_size)
+                .zip(input[0..n / 2].chunks(chunk_size))
+            {
                 s.execute(move || {
-                    let mut w_m = if index > 0 {
-                        omega.pow_vartime(&[(index * chunk_size) as u64])
-                    } else {
-                        E::Fr::one()
-                    };
-
                     for i in 0..os.len() {
-                        os[i] = os[i] * w_m;
-                        w_m = w_m * omega;
+                        os[i] = os[i] * ip[i];
                     }
                 });
             }
