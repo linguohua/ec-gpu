@@ -1,8 +1,9 @@
 //! An interface for dealing with the kinds of parallel computations involved.
 use std::env;
 
-use crossbeam_channel::{bounded, Receiver};
 use fnv::FnvHashMap as HashMap;
+use crossbeam_channel::{bounded, Receiver, SendError};
+use log::trace;
 use once_cell::sync::Lazy;
 use std::sync::{Arc, Mutex};
 use yastl::Pool;
@@ -61,7 +62,13 @@ impl Worker {
 
         THREAD_POOL.spawn(move || {
             let res = f();
-            sender.send(res).unwrap();
+            // Best effort. We run it in a separate thread, so the receiver might not exist
+            // anymore, but that's OK. It only means that we are not interested in the result.
+            // A message is logged though, as concurrency issues are hard to debug and this might
+            // help in such cases.
+            if let Err(SendError(_)) = sender.send(res) {
+                trace!("Cannot send result");
+            }
         });
 
         Waiter { receiver }
