@@ -23,6 +23,7 @@ rust-gpu-tools = { version = "0.6.0", default-features = false, optional = true 
 temp-env = "0.2.0"
 thiserror = "1.0.30"
 yastl = "0.1.2"
+fnv = "1.0"
 
 [dev-dependencies]
 blstrs = { version = "0.5.0", features = ["gpu"] }
