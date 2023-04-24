@@ -1,5 +1,5 @@
 use std::ops::AddAssign;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 
 use ec_gpu::GpuName;
 use ff::PrimeField;
@@ -10,7 +10,7 @@ use yastl::Scope;
 
 use crate::{
     error::{EcError, EcResult},
-    threadpool::Worker,
+    threadpool::{Worker, GPU_PROGRAM_LOCKS},
 };
 
 /// On the GPU, the exponents are split into windows, this is the maximum number of such windows.
@@ -47,6 +47,8 @@ pub struct SingleMultiexpKernel<'a, G>
 where
     G: PrimeCurveAffine,
 {
+    gpu_lock: Arc<Mutex<()>>,
+
     program: Program,
     /// The number of exponentiations the GPU can handle in a single execution of the kernel.
     n: usize,
@@ -110,8 +112,17 @@ where
         let compute_capability = device.compute_capability();
         let work_units = work_units(compute_units, compute_capability);
         let chunk_size = calc_chunk_size::<G>(mem, work_units);
+        let gpu_id = device.unique_id().to_string();
+        let lck = {
+            let mut llock = GPU_PROGRAM_LOCKS.lock().unwrap();
+            let lck = llock
+                .entry(gpu_id.to_string())
+                .or_insert(Arc::new(Mutex::new(())));
+            lck.clone()
+        };
 
         Ok(SingleMultiexpKernel {
+            gpu_lock: lck,
             program,
             n: chunk_size,
             work_units,
@@ -150,6 +161,9 @@ where
         let closures = program_closures!(|program, _arg| -> EcResult<Vec<G::Curve>> {
             let base_buffer = program.create_buffer_from_slice(bases)?;
             let exp_buffer = program.create_buffer_from_slice(exponents)?;
+
+            let lock = self.gpu_lock.clone();
+            let _lock2 = lock.lock().unwrap();
 
             // It is safe as the GPU will initialize that buffer
             let bucket_buffer =
