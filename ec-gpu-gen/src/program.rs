@@ -39,6 +39,16 @@ macro_rules! program {
                 Err(_) => default_framework,
             };
 
+            let gpu_id = device.unique_id().to_string();
+            let lck = {
+                let mut llock = ec_gpu_gen::threadpool::GPU_PROGRAM_LOCKS.lock().unwrap();
+                let lck = llock
+                    .entry(gpu_id.to_string())
+                    .or_insert(std::sync::Arc::new(std::sync::Mutex::new(())));
+                lck.clone()
+            };
+            let _lck = lck.lock();
+
             match framework {
                 #[cfg(feature = "cuda")]
                 Framework::Cuda => {
