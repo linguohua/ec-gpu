@@ -161,10 +161,11 @@ where
         let closures = program_closures!(|program, _arg| -> EcResult<Vec<G::Curve>> {
             let lock = self.gpu_lock.clone();
             let lock2 = lock.lock().unwrap();
+
             let base_buffer = program.create_buffer_from_slice(bases)?;
             let exp_buffer = program.create_buffer_from_slice(exponents)?;
             let base_len = bases.len();
-            drop(lock2);
+            //drop(lock2);
 
             // The global work size follows CUDA's definition and is the number of
             // `LOCAL_WORK_SIZE` sized thread groups.
@@ -173,7 +174,7 @@ where
             let kernel_name = format!("{}_multiexp", G::name());
             let kernel = program.create_kernel(&kernel_name, global_work_size, LOCAL_WORK_SIZE)?;
 
-            let _lock2 = lock.lock().unwrap();
+            //let lock2 = lock.lock().unwrap();
 
             // It is safe as the GPU will initialize that buffer
             let bucket_buffer =
@@ -195,7 +196,7 @@ where
             drop(base_buffer);
             drop(exp_buffer);
             drop(bucket_buffer);
-            drop(_lock2);
+            drop(lock2);
 
             let mut results = vec![G::Curve::identity(); self.work_units];
             program.read_into_buffer(&result_buffer, &mut results)?;
