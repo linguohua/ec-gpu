@@ -91,9 +91,6 @@ impl<'a, F: Field + GpuName> SingleFftKernel<'a, F> {
         let closures = program_closures!(|program, input: &mut [F]| -> EcResult<()> {
             let n = 1 << log_n;
 
-            let lock = self.gpu_lock.clone();
-            let lock2 = lock.lock().unwrap();
-
             // The precalculated values pq` and `omegas` are valid for radix degrees up to `max_deg`
             let max_deg = cmp::min(MAX_LOG2_RADIX, log_n);
 
@@ -124,8 +121,8 @@ impl<'a, F: Field + GpuName> SingleFftKernel<'a, F> {
             let mut src_buffer = unsafe { program.create_buffer::<F>(n)? };
             program.write_from_buffer(&mut src_buffer, &*input)?;
 
-            // let lock = self.gpu_lock.clone();
-            // let lock2 = lock.lock().unwrap();
+            let lock = self.gpu_lock.clone();
+            let lock2 = lock.lock().unwrap();
 
             let mut dst_buffer = unsafe { program.create_buffer::<F>(n)? };
 
@@ -184,8 +181,6 @@ impl<'a, F: Field + GpuName> SingleFftKernel<'a, F> {
     pub fn radix_fft2(&mut self, input: &mut [F], omega: &F, log_n: u32) -> EcResult<()> {
         let closures = program_closures!(|program, input: &mut [F]| -> EcResult<()> {
             let n = 1 << log_n;
-            let lock = self.gpu_lock.clone();
-            let lock2 = lock.lock().unwrap();
 
             // The precalculated values pq` and `omegas` are valid for radix degrees up to `max_deg`
             let max_deg = cmp::min(MAX_LOG2_RADIX, log_n);
@@ -212,8 +207,8 @@ impl<'a, F: Field + GpuName> SingleFftKernel<'a, F> {
             }
             let omegas_buffer = program.create_buffer_from_slice(&omegas)?;
 
-            // let lock = self.gpu_lock.clone();
-            // let lock2 = lock.lock().unwrap();
+            let lock = self.gpu_lock.clone();
+            let lock2 = lock.lock().unwrap();
 
             // All usages are safe as the buffers are initialized from either the host or the GPU
             // before they are read.
