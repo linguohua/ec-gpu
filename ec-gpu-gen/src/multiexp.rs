@@ -192,6 +192,11 @@ where
                 .arg(&(window_size as u32))
                 .run()?;
 
+            drop(base_buffer);
+            drop(exp_buffer);
+            drop(bucket_buffer);
+            drop(_lock2);
+
             let mut results = vec![G::Curve::identity(); self.work_units];
             program.read_into_buffer(&result_buffer, &mut results)?;
 
