@@ -160,11 +160,11 @@ where
 
         let closures = program_closures!(|program, _arg| -> EcResult<Vec<G::Curve>> {
             let lock = self.gpu_lock.clone();
-            let lock2 = lock.lock().unwrap();
+            //let lock2 = lock.lock().unwrap();
             let base_buffer = program.create_buffer_from_slice(bases)?;
             let exp_buffer = program.create_buffer_from_slice(exponents)?;
             let base_len = bases.len();
-            drop(lock2);
+            //drop(lock2);
 
             let _lock2 = lock.lock().unwrap();
 
@@ -343,6 +343,51 @@ where
                     *result = acc;
                 }
             });
+        }
+    }
+
+    /// Calculate multiexp on all available GPUs.
+    ///
+    /// It needs to run within a [`yastl::Scope`]. This method usually isn't called directly, use
+    /// [`MultiexpKernel::multiexp`] instead.
+    pub fn parallel_multiexp4<'s>(
+        &'s mut self,
+        bases: &'s [G],
+        exps: &'s [<G::Scalar as PrimeField>::Repr],
+        results: &'s mut [G::Curve],
+        error: Arc<RwLock<EcResult<()>>>,
+    ) {
+        let num_devices = self.kernels.len();
+        let num_exps = exps.len();
+        // The maximum number of exponentiations per device.
+        let chunk_size = ((num_exps as f64) / (num_devices as f64)).ceil() as usize;
+
+        for (((bases, exps), kern), result) in bases
+            .chunks(chunk_size)
+            .zip(exps.chunks(chunk_size))
+            // NOTE vmx 2021-11-17: This doesn't need to be a mutable iterator. But when it isn't
+            // there will be errors that the OpenCL CommandQueue cannot be shared between threads
+            // safely.
+            .zip(self.kernels.iter_mut())
+            .zip(results.iter_mut())
+        {
+            let error = error.clone();
+            let mut acc = G::Curve::identity();
+            for (bases, exps) in bases.chunks(kern.n).zip(exps.chunks(kern.n)) {
+                if error.read().unwrap().is_err() {
+                    break;
+                }
+                match kern.multiexp(bases, exps) {
+                    Ok(result) => acc.add_assign(&result),
+                    Err(e) => {
+                        *error.write().unwrap() = Err(e);
+                        break;
+                    }
+                }
+            }
+            if error.read().unwrap().is_ok() {
+                *result = acc;
+            }
         }
     }
 
