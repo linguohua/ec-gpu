@@ -159,14 +159,11 @@ where
         // Each thread will use `num_groups` * `num_windows` * `bucket_len` buckets.
 
         let closures = program_closures!(|program, _arg| -> EcResult<Vec<G::Curve>> {
-            let lock = self.gpu_lock.clone();
-            let _lock2 = lock.lock().unwrap();
-
             let base_buffer = program.create_buffer_from_slice(bases)?;
             let exp_buffer = program.create_buffer_from_slice(exponents)?;
 
-            // let lock = self.gpu_lock.clone();
-            // let _lock2 = lock.lock().unwrap();
+            let lock = self.gpu_lock.clone();
+            let _lock2 = lock.lock().unwrap();
 
             // It is safe as the GPU will initialize that buffer
             let bucket_buffer =
