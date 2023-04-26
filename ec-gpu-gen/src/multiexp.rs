@@ -160,11 +160,18 @@ where
 
         let closures = program_closures!(|program, _arg| -> EcResult<Vec<G::Curve>> {
             let lock = self.gpu_lock.clone();
-            let base_buffer = program.create_buffer_from_slice(bases)?;
             let lock2 = lock.lock().unwrap();
+            let base_buffer = program.create_buffer_from_slice(bases)?;
             let exp_buffer = program.create_buffer_from_slice(exponents)?;
             let base_len = bases.len();
             drop(lock2);
+
+            // The global work size follows CUDA's definition and is the number of
+            // `LOCAL_WORK_SIZE` sized thread groups.
+            let global_work_size = div_ceil(num_windows * num_groups, LOCAL_WORK_SIZE);
+
+            let kernel_name = format!("{}_multiexp", G::name());
+            let kernel = program.create_kernel(&kernel_name, global_work_size, LOCAL_WORK_SIZE)?;
 
             let _lock2 = lock.lock().unwrap();
 
@@ -173,13 +180,6 @@ where
                 unsafe { program.create_buffer::<G::Curve>(self.work_units * bucket_len)? };
             // It is safe as the GPU will initialize that buffer
             let result_buffer = unsafe { program.create_buffer::<G::Curve>(self.work_units)? };
-
-            // The global work size follows CUDA's definition and is the number of
-            // `LOCAL_WORK_SIZE` sized thread groups.
-            let global_work_size = div_ceil(num_windows * num_groups, LOCAL_WORK_SIZE);
-
-            let kernel_name = format!("{}_multiexp", G::name());
-            let kernel = program.create_kernel(&kernel_name, global_work_size, LOCAL_WORK_SIZE)?;
 
             kernel
                 .arg(&base_buffer)
