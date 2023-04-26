@@ -160,11 +160,11 @@ where
 
         let closures = program_closures!(|program, _arg| -> EcResult<Vec<G::Curve>> {
             let lock = self.gpu_lock.clone();
-            //let lock2 = lock.lock().unwrap();
             let base_buffer = program.create_buffer_from_slice(bases)?;
+            let lock2 = lock.lock().unwrap();
             let exp_buffer = program.create_buffer_from_slice(exponents)?;
             let base_len = bases.len();
-            //drop(lock2);
+            drop(lock2);
 
             let _lock2 = lock.lock().unwrap();
 
