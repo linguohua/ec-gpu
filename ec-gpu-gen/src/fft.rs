@@ -26,7 +26,7 @@ where
 {
     mem_size_type: ECMemSizeType,
     device_id: String,
-    gpu_lock: Arc<Mutex<()>>,
+    _gpu_lock: Arc<Mutex<()>>,
     program: Program,
     /// An optional function which will be called at places where it is possible to abort the FFT
     /// calculations. If it returns true, the calculation will be aborted with an
@@ -65,7 +65,7 @@ impl<'a, F: Field + GpuName> SingleFftKernel<'a, F> {
 
         Ok(SingleFftKernel {
             program: program,
-            gpu_lock: lck,
+            _gpu_lock: lck,
             device_id: gpu_id,
             mem_size_type: mem_type,
             maybe_abort,
@@ -88,6 +88,7 @@ impl<'a, F: Field + GpuName> SingleFftKernel<'a, F> {
     /// * `omega` - Special value `omega` is used for FFT over finite-fields
     /// * `log_n` - Specifies log2 of number of elements
     pub fn radix_fft1(&mut self, input: &mut [F], omega: &F, log_n: u32) -> EcResult<()> {
+        info!("radix_fft1");
         let closures = program_closures!(|program, input: &mut [F]| -> EcResult<()> {
             let n = 1 << log_n;
 
@@ -121,8 +122,8 @@ impl<'a, F: Field + GpuName> SingleFftKernel<'a, F> {
             let mut src_buffer = unsafe { program.create_buffer::<F>(n)? };
             program.write_from_buffer(&mut src_buffer, &*input)?;
 
-            let lock = self.gpu_lock.clone();
-            let lock2 = lock.lock().unwrap();
+            // let lock = self.gpu_lock.clone();
+            // let lock2 = lock.lock().unwrap();
 
             let mut dst_buffer = unsafe { program.create_buffer::<F>(n)? };
 
@@ -165,7 +166,7 @@ impl<'a, F: Field + GpuName> SingleFftKernel<'a, F> {
             }
 
             drop(dst_buffer);
-            drop(lock2);
+            // drop(lock2);
 
             program.read_into_buffer(&src_buffer, input)?;
 
@@ -179,6 +180,7 @@ impl<'a, F: Field + GpuName> SingleFftKernel<'a, F> {
     /// * `omega` - Special value `omega` is used for FFT over finite-fields
     /// * `log_n` - Specifies log2 of number of elements
     pub fn radix_fft2(&mut self, input: &mut [F], omega: &F, log_n: u32) -> EcResult<()> {
+        info!("radix_fft2");
         let closures = program_closures!(|program, input: &mut [F]| -> EcResult<()> {
             let n = 1 << log_n;
 
@@ -207,8 +209,8 @@ impl<'a, F: Field + GpuName> SingleFftKernel<'a, F> {
             }
             let omegas_buffer = program.create_buffer_from_slice(&omegas)?;
 
-            let lock = self.gpu_lock.clone();
-            let lock2 = lock.lock().unwrap();
+            // let lock = self.gpu_lock.clone();
+            // let lock2 = lock.lock().unwrap();
 
             // All usages are safe as the buffers are initialized from either the host or the GPU
             // before they are read.
@@ -258,7 +260,7 @@ impl<'a, F: Field + GpuName> SingleFftKernel<'a, F> {
 
             drop(dst_buffer);
             drop(src_buffer);
-            drop(lock2);
+            //drop(lock2);
 
             Ok(())
         });
@@ -267,8 +269,9 @@ impl<'a, F: Field + GpuName> SingleFftKernel<'a, F> {
     }
 
     fn radix_fft3(&mut self, input: &mut [F], omega: &F, log_n: u32) -> EcResult<()> {
-        let lock = self.gpu_lock.clone();
-        let _lock2 = lock.lock().unwrap();
+        info!("radix_fft3");
+        // let lock = self.gpu_lock.clone();
+        // let _lock2 = lock.lock().unwrap();
 
         let n = input.len();
 
