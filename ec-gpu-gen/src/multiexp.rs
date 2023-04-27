@@ -47,7 +47,7 @@ pub struct SingleMultiexpKernel<'a, G>
 where
     G: PrimeCurveAffine,
 {
-    gpu_lock: Arc<Mutex<()>>,
+    _gpu_lock: Arc<Mutex<()>>,
 
     program: Program,
     /// The number of exponentiations the GPU can handle in a single execution of the kernel.
@@ -122,7 +122,7 @@ where
         };
 
         Ok(SingleMultiexpKernel {
-            gpu_lock: lck,
+            _gpu_lock: lck,
             program,
             n: chunk_size,
             work_units,
@@ -159,8 +159,8 @@ where
         // Each thread will use `num_groups` * `num_windows` * `bucket_len` buckets.
 
         let closures = program_closures!(|program, _arg| -> EcResult<Vec<G::Curve>> {
-            let lock = self.gpu_lock.clone();
-            let lock2 = lock.lock().unwrap();
+            //let lock = self.gpu_lock.clone();
+            //let lock2 = lock.lock().unwrap();
 
             let base_buffer = program.create_buffer_from_slice(bases)?;
             let exp_buffer = program.create_buffer_from_slice(exponents)?;
@@ -196,7 +196,7 @@ where
             drop(base_buffer);
             drop(exp_buffer);
             drop(bucket_buffer);
-            drop(lock2);
+            //drop(lock2);
 
             let mut results = vec![G::Curve::identity(); self.work_units];
             program.read_into_buffer(&result_buffer, &mut results)?;
