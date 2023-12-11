@@ -70,3 +70,9 @@ pub use rust_gpu_tools;
 
 pub use error::{EcError, EcResult};
 pub use source::{generate, SourceBuilder};
+
+/// ugly
+pub fn log_program_type(device_type: &str, device_id: String) {
+    use log::info;
+    info!("Create program for {} device:{}", device_type, device_id);
+}

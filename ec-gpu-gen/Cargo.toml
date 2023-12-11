@@ -25,6 +25,7 @@ rust-gpu-tools = { version = "0.7.0", default-features = false, optional = true 
 sha2 = "0.10"
 thiserror = "1.0.30"
 yastl = "0.1.2"
+fnv = "1.0"
 
 [dev-dependencies]
 # NOTE vmx 2022-07-07: Using the `__private_bench` feature of `blstrs` is just
