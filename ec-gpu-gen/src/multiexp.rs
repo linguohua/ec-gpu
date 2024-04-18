@@ -1,5 +1,5 @@
 use std::ops::AddAssign;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 
 use ec_gpu::GpuName;
 use ff::PrimeField;
@@ -10,7 +10,7 @@ use yastl::Scope;
 
 use crate::{
     error::{EcError, EcResult},
-    threadpool::Worker,
+    threadpool::{Worker, GPU_PROGRAM_LOCKS},
 };
 
 /// On the GPU, the exponents are split into windows, this is the maximum number of such windows.
@@ -47,6 +47,8 @@ pub struct SingleMultiexpKernel<'a, G>
 where
     G: PrimeCurveAffine,
 {
+    gpu_lock: Arc<Mutex<()>>,
+
     program: Program,
     /// The number of exponentiations the GPU can handle in a single execution of the kernel.
     n: usize,
@@ -110,8 +112,17 @@ where
         let compute_capability = device.compute_capability();
         let work_units = work_units(compute_units, compute_capability);
         let chunk_size = calc_chunk_size::<G>(mem, work_units);
+        let gpu_id = device.unique_id().to_string();
+        let lck = {
+            let mut llock = GPU_PROGRAM_LOCKS.lock().unwrap();
+            let lck = llock
+                .entry(gpu_id.to_string())
+                .or_insert(Arc::new(Mutex::new(())));
+            lck.clone()
+        };
 
         Ok(SingleMultiexpKernel {
+            gpu_lock: lck,
             program,
             n: chunk_size,
             work_units,
@@ -148,14 +159,12 @@ where
         // Each thread will use `num_groups` * `num_windows` * `bucket_len` buckets.
 
         let closures = program_closures!(|program, _arg| -> EcResult<Vec<G::Curve>> {
+            let lock = self.gpu_lock.clone();
+            let lock2 = lock.lock().unwrap();
+
             let base_buffer = program.create_buffer_from_slice(bases)?;
             let exp_buffer = program.create_buffer_from_slice(exponents)?;
-
-            // It is safe as the GPU will initialize that buffer
-            let bucket_buffer =
-                unsafe { program.create_buffer::<G::Curve>(self.work_units * bucket_len)? };
-            // It is safe as the GPU will initialize that buffer
-            let result_buffer = unsafe { program.create_buffer::<G::Curve>(self.work_units)? };
+            let base_len = bases.len();
 
             // The global work size follows CUDA's definition and is the number of
             // `LOCAL_WORK_SIZE` sized thread groups.
@@ -164,16 +173,27 @@ where
             let kernel_name = format!("{}_multiexp", G::name());
             let kernel = program.create_kernel(&kernel_name, global_work_size, LOCAL_WORK_SIZE)?;
 
+            // It is safe as the GPU will initialize that buffer
+            let bucket_buffer =
+                unsafe { program.create_buffer::<G::Curve>(self.work_units * bucket_len)? };
+            // It is safe as the GPU will initialize that buffer
+            let result_buffer = unsafe { program.create_buffer::<G::Curve>(self.work_units)? };
+
             kernel
                 .arg(&base_buffer)
                 .arg(&bucket_buffer)
                 .arg(&result_buffer)
                 .arg(&exp_buffer)
-                .arg(&(bases.len() as u32))
+                .arg(&(base_len as u32))
                 .arg(&(num_groups as u32))
                 .arg(&(num_windows as u32))
                 .arg(&(window_size as u32))
                 .run()?;
+
+            drop(base_buffer);
+            drop(exp_buffer);
+            drop(bucket_buffer);
+            drop(lock2);
 
             let mut results = vec![G::Curve::identity(); self.work_units];
             program.read_into_buffer(&result_buffer, &mut results)?;
@@ -326,6 +346,51 @@ where
                     *result = acc;
                 }
             });
+        }
+    }
+
+    /// Calculate multiexp on all available GPUs.
+    ///
+    /// It needs to run within a [`yastl::Scope`]. This method usually isn't called directly, use
+    /// [`MultiexpKernel::multiexp`] instead.
+    pub fn parallel_multiexp4<'s>(
+        &'s mut self,
+        bases: &'s [G],
+        exps: &'s [<G::Scalar as PrimeField>::Repr],
+        results: &'s mut [G::Curve],
+        error: Arc<RwLock<EcResult<()>>>,
+    ) {
+        let num_devices = self.kernels.len();
+        let num_exps = exps.len();
+        // The maximum number of exponentiations per device.
+        let chunk_size = ((num_exps as f64) / (num_devices as f64)).ceil() as usize;
+
+        for (((bases, exps), kern), result) in bases
+            .chunks(chunk_size)
+            .zip(exps.chunks(chunk_size))
+            // NOTE vmx 2021-11-17: This doesn't need to be a mutable iterator. But when it isn't
+            // there will be errors that the OpenCL CommandQueue cannot be shared between threads
+            // safely.
+            .zip(self.kernels.iter_mut())
+            .zip(results.iter_mut())
+        {
+            let error = error.clone();
+            let mut acc = G::Curve::identity();
+            for (bases, exps) in bases.chunks(kern.n).zip(exps.chunks(kern.n)) {
+                if error.read().unwrap().is_err() {
+                    break;
+                }
+                match kern.multiexp(bases, exps) {
+                    Ok(result) => acc.add_assign(&result),
+                    Err(e) => {
+                        *error.write().unwrap() = Err(e);
+                        break;
+                    }
+                }
+            }
+            if error.read().unwrap().is_ok() {
+                *result = acc;
+            }
         }
     }
 

@@ -8,6 +8,7 @@
 macro_rules! program {
     ($device:ident) => {{
         use $crate::rust_gpu_tools::{Framework, GPUError, Program};
+        use $crate::{log_program_type};
         (|device: &Device| -> Result<Program, $crate::EcError> {
             // Selects a CUDA or OpenCL on the `EC_GPU_FRAMEWORK` environment variable and the
             // compile-time features.
@@ -39,12 +40,24 @@ macro_rules! program {
                 Err(_) => default_framework,
             };
 
+            let gpu_id = device.unique_id().to_string();
+            let lck = {
+                let mut llock = ec_gpu_gen::threadpool::GPU_PROGRAM_LOCKS.lock().unwrap();
+                let lck = llock
+                    .entry(gpu_id.to_string())
+                    .or_insert(std::sync::Arc::new(std::sync::Mutex::new(())));
+                lck.clone()
+            };
+            let _lck = lck.lock();
+
             match framework {
                 #[cfg(feature = "cuda")]
                 Framework::Cuda => {
                     let kernel = include_bytes!(env!("_EC_GPU_CUDA_KERNEL_FATBIN"));
                     let cuda_device = device.cuda_device().ok_or(GPUError::DeviceNotFound)?;
                     let program = $crate::rust_gpu_tools::cuda::Program::from_bytes(cuda_device, kernel)?;
+                    use log::info;
+                    log_program_type("cuda", device.unique_id().to_string());
                     Ok(Program::Cuda(program))
                 }
                 #[cfg(feature = "opencl")]
@@ -52,6 +65,7 @@ macro_rules! program {
                     let source = include_str!(env!("_EC_GPU_OPENCL_KERNEL_SOURCE"));
                     let opencl_device = device.opencl_device().ok_or(GPUError::DeviceNotFound)?;
                     let program = $crate::rust_gpu_tools::opencl::Program::from_opencl(opencl_device, source)?;
+                    log_program_type("opencl", device.unique_id().to_string());
                     Ok(Program::Opencl(program))
                 }
             }
